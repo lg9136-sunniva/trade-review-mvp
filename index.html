@@ -512,7 +512,7 @@
     };
 
     const aliases = {
-      date: ["date", "trade_date", "成交日期", "交易日期", "发生日期", "业务日期", "日期", "时间"],
+      date: ["date", "trade_date", "成交日期", "交易日期", "交收日期", "发生日期", "业务日期", "日期", "时间"],
       code: ["code", "symbol", "证券代码", "股票代码", "代码", "ticker"],
       name: ["name", "证券名称", "股票名称", "名称"],
       side: ["side", "direction", "买卖方向", "买卖标志", "业务名称", "操作", "方向", "买卖"],
@@ -570,7 +570,11 @@
     function toDate(value) {
       const raw = String(value || "").trim();
       if (/^\d{8}$/.test(raw)) return `${raw.slice(0,4)}-${raw.slice(4,6)}-${raw.slice(6,8)}`;
-      const d = new Date(raw.replaceAll("/", "-"));
+      const normalized = raw
+        .replace(/[年月./]/g, "-")
+        .replace(/日/g, "")
+        .replace(/-+/g, "-");
+      const d = new Date(normalized);
       if (Number.isNaN(d.getTime())) return raw.slice(0, 10);
       return d.toISOString().slice(0, 10);
     }
