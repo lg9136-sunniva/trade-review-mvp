@@ -1,4 +1,4 @@
-const CACHE_NAME = "trade-review-mvp-v2";
+const CACHE_NAME = "trade-review-mvp-v3";
 const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", event => {
