@@ -375,13 +375,13 @@
         <div class="small">交易事实、基本面事件、资金关注度，不做情绪放大。</div>
       </div>
       <div class="header-actions">
-        <label class="file-button primary" title="导入券商导出的 CSV 交易单">
+        <label class="file-button primary" title="导入券商导出的 Excel 或 CSV 交易单">
           导入交易单
-          <input id="tradeFile" type="file" accept=".csv,.txt">
+          <input id="tradeFile" type="file" accept=".xlsx,.xls,.csv,.txt">
         </label>
-        <label class="file-button" title="可选：导入日线 CSV，字段含 date/open/high/low/close/volume/code">
+        <label class="file-button" title="可选：导入日线 Excel 或 CSV，字段含 date/open/high/low/close/volume/code">
           导入日线
-          <input id="marketFile" type="file" accept=".csv,.txt">
+          <input id="marketFile" type="file" accept=".xlsx,.xls,.csv,.txt">
         </label>
         <button class="button" id="loadSample" type="button">载入示例</button>
         <button class="button" id="exportReview" type="button">导出复盘</button>
@@ -476,6 +476,7 @@
     </main>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script>
     const state = {
       trades: [],
@@ -511,13 +512,13 @@
     };
 
     const aliases = {
-      date: ["date", "trade_date", "成交日期", "交易日期", "日期", "时间"],
+      date: ["date", "trade_date", "成交日期", "交易日期", "发生日期", "业务日期", "日期", "时间"],
       code: ["code", "symbol", "证券代码", "股票代码", "代码", "ticker"],
       name: ["name", "证券名称", "股票名称", "名称"],
-      side: ["side", "direction", "买卖方向", "操作", "方向", "买卖"],
-      price: ["price", "成交价格", "成交价", "价格", "均价"],
-      qty: ["qty", "quantity", "成交数量", "数量", "股数"],
-      amount: ["amount", "成交金额", "金额"],
+      side: ["side", "direction", "买卖方向", "买卖标志", "业务名称", "操作", "方向", "买卖"],
+      price: ["price", "成交价格", "成交价", "成交均价", "价格", "均价"],
+      qty: ["qty", "quantity", "成交数量", "证券数量", "数量", "股数"],
+      amount: ["amount", "成交金额", "发生金额", "清算金额", "金额"],
       open: ["open", "开盘", "开盘价"],
       high: ["high", "最高", "最高价"],
       low: ["low", "最低", "最低价"],
@@ -546,7 +547,7 @@
     }
 
     function pick(headers, key) {
-      const lower = headers.map(h => h.toLowerCase());
+      const lower = headers.map(h => String(h || "").trim().toLowerCase());
       for (const name of aliases[key]) {
         const idx = lower.indexOf(name.toLowerCase());
         if (idx >= 0) return idx;
@@ -574,12 +575,21 @@
       return d.toISOString().slice(0, 10);
     }
 
-    function readTrades(text) {
-      const rows = parseCsv(text);
-      if (rows.length < 2) return [];
-      const headers = rows[0];
+    function findHeaderRow(rows, fields) {
+      let best = { index: -1, score: 0 };
+      rows.slice(0, 40).forEach((row, index) => {
+        const score = fields.reduce((total, key) => total + (pick(row, key) >= 0 ? 1 : 0), 0);
+        if (score > best.score) best = { index, score };
+      });
+      return best.score >= 3 ? best.index : -1;
+    }
+
+    function rowsToTrades(rows) {
+      const headerIndex = findHeaderRow(rows, ["date", "code", "name", "side", "price", "qty", "amount"]);
+      if (headerIndex < 0) return [];
+      const headers = rows[headerIndex];
       const idx = Object.fromEntries(["date", "code", "name", "side", "price", "qty", "amount"].map(k => [k, pick(headers, k)]));
-      return rows.slice(1).map(r => ({
+      return rows.slice(headerIndex + 1).map(r => ({
         date: toDate(r[idx.date]),
         code: String(r[idx.code] || "").trim(),
         name: String(r[idx.name] || r[idx.code] || "").trim(),
@@ -590,13 +600,17 @@
       })).filter(t => t.date && t.code && t.price > 0);
     }
 
-    function readMarket(text) {
-      const rows = parseCsv(text);
-      if (rows.length < 2) return {};
-      const headers = rows[0];
+    function readTrades(text) {
+      return rowsToTrades(parseCsv(text));
+    }
+
+    function rowsToMarket(rows) {
+      const headerIndex = findHeaderRow(rows, ["date", "code", "open", "high", "low", "close", "volume"]);
+      if (headerIndex < 0) return {};
+      const headers = rows[headerIndex];
       const idx = Object.fromEntries(["date", "code", "open", "high", "low", "close", "volume"].map(k => [k, pick(headers, k)]));
       const grouped = {};
-      rows.slice(1).forEach(r => {
+      rows.slice(headerIndex + 1).forEach(r => {
         const code = String(r[idx.code] || "").trim();
         if (!code) return;
         grouped[code] ||= [];
@@ -611,6 +625,10 @@
       });
       Object.values(grouped).forEach(list => list.sort((a, b) => a.date.localeCompare(b.date)));
       return grouped;
+    }
+
+    function readMarket(text) {
+      return rowsToMarket(parseCsv(text));
     }
 
     function stockGroups() {
@@ -668,7 +686,7 @@
       const groups = stockGroups();
       els.portfolioMeta.textContent = groups.length ? `${groups.length} 只股票，${state.trades.length} 笔交易` : "未导入";
       if (!groups.length) {
-        els.stockList.innerHTML = `<div class="empty">导入交易单后，这里会出现你交易过的股票。支持常见 CSV 表头：日期、代码、名称、方向、数量、价格。</div>`;
+        els.stockList.innerHTML = `<div class="empty">导入 Excel 或 CSV 交易单后，这里会出现你交易过的股票。支持常见表头：日期、代码、名称、方向、数量、价格。</div>`;
         return;
       }
       if (!state.selected) state.selected = groups[0].code;
@@ -874,24 +892,54 @@
       renderThemes();
     }
 
-    async function readFile(file) {
-      return await file.text();
+    async function readSpreadsheet(file) {
+      const extension = file.name.split(".").pop().toLowerCase();
+      if (extension === "csv" || extension === "txt") return [parseCsv(await file.text())];
+      if (!window.XLSX) throw new Error("Excel 读取组件加载失败，请确认网络正常后刷新网页。");
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
+      return workbook.SheetNames.map(name =>
+        XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1, defval: "", raw: false })
+      );
     }
 
     els.tradeFile.addEventListener("change", async e => {
       const file = e.target.files[0];
       if (!file) return;
-      saveCurrentReview();
-      state.trades = readTrades(await readFile(file));
-      state.selected = null;
-      render();
+      try {
+        saveCurrentReview();
+        const sheets = await readSpreadsheet(file);
+        const candidates = sheets.map(rowsToTrades);
+        state.trades = candidates.sort((a, b) => b.length - a.length)[0] || [];
+        if (!state.trades.length) {
+          alert("没有识别到成交记录。请确认文件中包含日期、证券代码、买卖方向、成交价格等列。");
+          return;
+        }
+        state.selected = null;
+        render();
+      } catch (error) {
+        alert(error.message || "文件读取失败，请换一个文件重试。");
+      } finally {
+        e.target.value = "";
+      }
     });
 
     els.marketFile.addEventListener("change", async e => {
       const file = e.target.files[0];
       if (!file) return;
-      state.market = { ...state.market, ...readMarket(await readFile(file)) };
-      render();
+      try {
+        const sheets = await readSpreadsheet(file);
+        const market = sheets.map(rowsToMarket).reduce((all, current) => ({ ...all, ...current }), {});
+        if (!Object.keys(market).length) {
+          alert("没有识别到日线数据，请检查日期、代码、开高低收和成交量列。");
+          return;
+        }
+        state.market = { ...state.market, ...market };
+        render();
+      } catch (error) {
+        alert(error.message || "文件读取失败，请换一个文件重试。");
+      } finally {
+        e.target.value = "";
+      }
     });
 
     els.showMarks.addEventListener("change", render);
