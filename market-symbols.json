@@ -20,6 +20,6 @@
       "session": "asia"
     }
   ],
-  "historyDays": 400,
-  "intradayDays": 400
+  "historyDays": 120,
+  "intradayDays": 120
 }
