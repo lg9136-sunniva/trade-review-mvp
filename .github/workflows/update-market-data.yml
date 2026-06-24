@@ -1,4 +1,4 @@
-name: Update market data
+name: .github/workflows/update-market-data.yml
 
 on:
   workflow_dispatch:
@@ -64,7 +64,7 @@ jobs:
           if [ "${{ steps.market.outputs.skip_intraday }}" = "true" ]; then
             EXTRA="--skip-intraday"
           fi
-          python3 scripts/update_market_data.py \
+          python3 update_market_data.py \
             --session "${{ steps.market.outputs.session }}" \
             $EXTRA
 
