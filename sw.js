@@ -1,5 +1,5 @@
-const CACHE_NAME = "trade-review-mvp-v4";
-const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg"];
+const CACHE_NAME = "trade-review-mvp-v7";
+const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg", "./data/market.json", "./data/intraday.json"];
 
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS)));

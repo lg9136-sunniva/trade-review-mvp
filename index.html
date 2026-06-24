@@ -91,6 +91,50 @@
 
     .file-button input { display: none; }
 
+    dialog {
+      width: min(680px, calc(100vw - 24px));
+      max-height: calc(100vh - 40px);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0;
+      color: var(--text);
+      box-shadow: 0 24px 60px rgba(22, 34, 51, .24);
+    }
+
+    dialog::backdrop {
+      background: rgba(23, 32, 42, .45);
+    }
+
+    .dialog-body {
+      padding: 14px;
+      display: grid;
+      gap: 12px;
+      overflow: auto;
+      max-height: calc(100vh - 150px);
+    }
+
+    .market-choice {
+      display: grid;
+      grid-template-columns: auto minmax(120px, 1fr) minmax(150px, 1fr);
+      align-items: center;
+      gap: 10px;
+      border-bottom: 1px solid var(--line);
+      padding: 9px 0;
+    }
+
+    .market-choice input[type="text"] {
+      width: 100%;
+    }
+
+    .dialog-actions {
+      padding: 12px 14px;
+      border-top: 1px solid var(--line);
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
     main {
       padding: 16px;
       display: grid;
@@ -383,6 +427,8 @@
           导入日线
           <input id="marketFile" type="file">
         </label>
+        <button class="button primary" id="chooseMarket" type="button">选择行情股票</button>
+        <button class="button" id="refreshMarket" type="button">读取最新行情</button>
         <button class="button" id="loadSample" type="button">载入示例</button>
         <button class="button" id="exportReview" type="button">导出复盘</button>
       </div>
@@ -476,11 +522,34 @@
     </main>
   </div>
 
+  <dialog id="marketDialog">
+    <div class="section-head">
+      <div>
+        <div class="section-title">选择需要更新行情的股票</div>
+        <div class="small" id="marketChoiceMeta">最多选择3只</div>
+      </div>
+      <button class="button" id="closeMarketDialog" type="button">关闭</button>
+    </div>
+    <div class="dialog-body">
+      <div class="small">股票来自你刚导入的交割单。每只会获取约一年日 K 和约一年5分钟分时，并在以后运行时补充更新。</div>
+      <div id="marketChoices"></div>
+      <label class="field">GitHub Actions 临时清单
+        <textarea id="marketActionInput" readonly placeholder="勾选股票后自动生成"></textarea>
+      </label>
+    </div>
+    <div class="dialog-actions">
+      <button class="button" id="copyMarketInput" type="button">复制清单</button>
+      <a class="button primary" href="https://github.com/lg9136-sunniva/trade-review-mvp/actions/workflows/update-market-data.yml" target="_blank" rel="noreferrer">打开更新任务</a>
+    </div>
+  </dialog>
+
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script>
     const state = {
       trades: [],
       market: {},
+      intraday: {},
+      marketUpdatedAt: null,
       selected: null,
       reviews: JSON.parse(localStorage.getItem("tradeReview.notes") || "{}"),
       themes: JSON.parse(localStorage.getItem("tradeReview.themes") || "null") || [
@@ -494,6 +563,8 @@
     const els = {
       tradeFile: document.getElementById("tradeFile"),
       marketFile: document.getElementById("marketFile"),
+      chooseMarket: document.getElementById("chooseMarket"),
+      refreshMarket: document.getElementById("refreshMarket"),
       loadSample: document.getElementById("loadSample"),
       exportReview: document.getElementById("exportReview"),
       stockList: document.getElementById("stockList"),
@@ -508,7 +579,13 @@
       saveReview: document.getElementById("saveReview"),
       reviewMeta: document.getElementById("reviewMeta"),
       themeGrid: document.getElementById("themeGrid"),
-      addTheme: document.getElementById("addTheme")
+      addTheme: document.getElementById("addTheme"),
+      marketDialog: document.getElementById("marketDialog"),
+      closeMarketDialog: document.getElementById("closeMarketDialog"),
+      marketChoices: document.getElementById("marketChoices"),
+      marketChoiceMeta: document.getElementById("marketChoiceMeta"),
+      marketActionInput: document.getElementById("marketActionInput"),
+      copyMarketInput: document.getElementById("copyMarketInput")
     };
 
     const aliases = {
@@ -642,6 +719,76 @@
         map[t.code].trades.push(t);
       });
       return Object.values(map).sort((a, b) => b.trades.length - a.trades.length);
+    }
+
+    function inferMarketSymbol(code) {
+      const raw = String(code || "").trim().toUpperCase();
+      if (raw.endsWith(".SH") || raw.endsWith(".SS")) return raw.replace(/\.(SH|SS)$/, ".SHG");
+      if (raw.endsWith(".SZ")) return raw.replace(/\.SZ$/, ".SHE");
+      if (raw.endsWith(".HK")) return `${raw.replace(".HK", "").padStart(4, "0").slice(-4)}.HK`;
+      if (/^\d{6}$/.test(raw)) return `${raw}.${/^[569]/.test(raw) ? "SHG" : "SHE"}`;
+      if (/^\d{5}$/.test(raw)) return `${raw.slice(-4)}.HK`;
+      if (/^[A-Z][A-Z0-9.-]*$/.test(raw)) return raw.includes(".") ? raw : `${raw}.US`;
+      return raw;
+    }
+
+    function chosenMarketSymbols() {
+      const selected = [];
+      els.marketChoices.querySelectorAll(".market-choice").forEach(row => {
+        const checked = row.querySelector('input[type="checkbox"]').checked;
+        if (!checked) return;
+        selected.push({
+          code: row.dataset.code,
+          eodhd: row.querySelector('input[type="text"]').value.trim().toUpperCase(),
+          name: row.dataset.name
+        });
+      });
+      return selected;
+    }
+
+    function updateMarketActionInput() {
+      const selected = chosenMarketSymbols();
+      els.marketChoiceMeta.textContent = `已选择 ${selected.length}/3 只`;
+      els.marketActionInput.value = selected.length ? JSON.stringify(selected) : "";
+      els.marketChoices.querySelectorAll('input[type="checkbox"]:not(:checked)').forEach(box => {
+        box.disabled = selected.length >= 3;
+      });
+    }
+
+    function openMarketChooser() {
+      const groups = stockGroups();
+      if (!groups.length) {
+        alert("请先导入交割单，再选择需要更新行情的股票。");
+        return;
+      }
+      els.marketChoices.innerHTML = groups.map(group => `
+        <label class="market-choice" data-code="${group.code}" data-name="${group.name}">
+          <input type="checkbox">
+          <span><strong>${group.name}</strong><br><span class="small">${group.code}</span></span>
+          <input type="text" value="${inferMarketSymbol(group.code)}" aria-label="${group.name} EODHD 行情代码">
+        </label>
+      `).join("");
+      els.marketChoices.querySelectorAll("input").forEach(input => {
+        input.addEventListener("change", updateMarketActionInput);
+        input.addEventListener("input", updateMarketActionInput);
+      });
+      updateMarketActionInput();
+      els.marketDialog.showModal();
+    }
+
+    async function copyMarketActionInput() {
+      if (!els.marketActionInput.value) {
+        alert("请先勾选1至3只股票。");
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(els.marketActionInput.value);
+      } catch {
+        els.marketActionInput.select();
+        document.execCommand("copy");
+      }
+      els.copyMarketInput.textContent = "已复制";
+      setTimeout(() => els.copyMarketInput.textContent = "复制清单", 1000);
     }
 
     function generateDaily(group) {
@@ -819,16 +966,23 @@
       ctx.stroke();
     }
 
-    function drawMinute(date, base) {
+    function drawMinute(date, base, code) {
       const { ctx, w, h } = setupCanvas(els.minuteChart);
       ctx.clearRect(0, 0, w, h);
       const pad = { l: 48, r: 16, t: 18, b: 28 };
-      const points = Array.from({ length: 48 }, (_, i) => {
-        const wave = Math.sin(i / 4) * base * .006 + Math.cos(i / 9) * base * .004;
-        return base + wave + (i - 24) * base * .00035;
-      });
+      const records = (state.intraday[code] || []).filter(point => point.date === date);
+      if (!records.length) {
+        ctx.fillStyle = "#17202a";
+        ctx.font = "13px sans-serif";
+        ctx.fillText(`${date} 分时线`, 12, 20);
+        ctx.fillStyle = "#647184";
+        ctx.font = "14px sans-serif";
+        ctx.fillText("暂无该日真实分时数据", Math.max(16, w / 2 - 70), h / 2);
+        return;
+      }
+      const points = records.map(point => point.close);
       const min = Math.min(...points), max = Math.max(...points);
-      const x = i => pad.l + i / (points.length - 1) * (w - pad.l - pad.r);
+      const x = i => pad.l + i / Math.max(1, points.length - 1) * (w - pad.l - pad.r);
       const y = p => pad.t + (max - p) / Math.max(.001, max - min) * (h - pad.t - pad.b);
       ctx.strokeStyle = "#e7ebf0";
       for (let i = 0; i < 3; i++) {
@@ -840,8 +994,10 @@
       ctx.font = "13px sans-serif";
       ctx.fillText(`${date} 分时线`, 12, 16);
       ctx.fillStyle = "#647184";
-      ctx.fillText("09:30", pad.l, h - 8);
-      ctx.fillText("15:00", w - 55, h - 8);
+      const firstTime = String(records[0].datetime || "").slice(11, 16);
+      const lastTime = String(records[records.length - 1].datetime || "").slice(11, 16);
+      ctx.fillText(firstTime || "开盘", pad.l, h - 8);
+      ctx.fillText(lastTime || "收盘", w - 55, h - 8);
     }
 
     function loadReview() {
@@ -891,9 +1047,42 @@
       els.chartTitle.textContent = group ? `${group.name} ${group.code}` : "请选择股票";
       els.chartSub.textContent = group ? `${daily.length} 根日线 · 红点买入 · 蓝点卖出` : "K 线只保留均线、价格、成交量和买卖点。";
       drawDaily(group, daily);
-      if (daily.length) drawMinute(daily[Math.floor(daily.length / 2)].date, daily[Math.floor(daily.length / 2)].close);
+      if (daily.length) {
+        const last = daily[daily.length - 1];
+        drawMinute(last.date, last.close, group.code);
+      }
+      if (state.marketUpdatedAt) {
+        els.chartNote.textContent = `行情最近更新：${new Date(state.marketUpdatedAt).toLocaleString()}。日 K 和5分钟分时默认保存约400天；双击任意日 K 查看当天真实分时。无分时权限或数据源缺失时会显示暂无数据。`;
+      }
       loadReview();
       renderThemes();
+    }
+
+    async function loadRemoteMarket(showResult = false) {
+      try {
+        const stamp = Date.now();
+        const [dailyResponse, intradayResponse] = await Promise.all([
+          fetch(`./data/market.json?v=${stamp}`, { cache: "no-store" }),
+          fetch(`./data/intraday.json?v=${stamp}`, { cache: "no-store" })
+        ]);
+        if (!dailyResponse.ok || !intradayResponse.ok) throw new Error("行情文件尚未生成");
+        const dailyPayload = await dailyResponse.json();
+        const intradayPayload = await intradayResponse.json();
+        Object.entries(dailyPayload.symbols || {}).forEach(([code, item]) => {
+          if (Array.isArray(item.daily) && item.daily.length) state.market[code] = item.daily;
+        });
+        Object.entries(intradayPayload.symbols || {}).forEach(([code, item]) => {
+          if (Array.isArray(item.points)) state.intraday[code] = item.points;
+        });
+        state.marketUpdatedAt = dailyPayload.updatedAt || intradayPayload.updatedAt || null;
+        render();
+        if (showResult) {
+          const count = Object.keys(dailyPayload.symbols || {}).length;
+          alert(count ? `已读取 ${count} 只股票的最新行情。` : "行情文件还是空的，请先在 GitHub Actions 运行更新任务。");
+        }
+      } catch (error) {
+        if (showResult) alert(`${error.message}。如果你正在打开本机文件，请到已发布的 GitHub 网页测试。`);
+      }
     }
 
     async function readSpreadsheet(file) {
@@ -947,6 +1136,10 @@
     });
 
     els.showMarks.addEventListener("change", render);
+    els.chooseMarket.addEventListener("click", openMarketChooser);
+    els.closeMarketDialog.addEventListener("click", () => els.marketDialog.close());
+    els.copyMarketInput.addEventListener("click", copyMarketActionInput);
+    els.refreshMarket.addEventListener("click", () => loadRemoteMarket(true));
     els.saveReview.addEventListener("click", () => {
       saveCurrentReview();
       els.saveReview.textContent = "已保存";
@@ -987,7 +1180,7 @@
         return dist < best.dist ? { dist, i } : best;
       }, { dist: Infinity, i: 0 });
       const day = daily[nearest.i];
-      if (day) drawMinute(day.date, day.close);
+      if (day) drawMinute(day.date, day.close, group.code);
     });
 
     window.addEventListener("resize", render);
@@ -1010,6 +1203,7 @@
     }
 
     render();
+    loadRemoteMarket();
   </script>
 </body>
 </html>

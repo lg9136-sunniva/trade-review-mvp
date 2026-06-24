@@ -1,0 +1,25 @@
+{
+  "symbols": [],
+  "examples": [
+    {
+      "code": "AAPL",
+      "eodhd": "AAPL.US",
+      "name": "Apple",
+      "session": "us"
+    },
+    {
+      "code": "00700",
+      "eodhd": "0700.HK",
+      "name": "腾讯控股",
+      "session": "asia"
+    },
+    {
+      "code": "600519",
+      "eodhd": "600519.SHG",
+      "name": "贵州茅台",
+      "session": "asia"
+    }
+  ],
+  "historyDays": 400,
+  "intradayDays": 400
+}
