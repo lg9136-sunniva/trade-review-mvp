@@ -1,4 +1,4 @@
-const CACHE_NAME = "trade-review-mvp-v7";
+const CACHE_NAME = "trade-review-mvp-v8";
 const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg", "./data/market.json", "./data/intraday.json"];
 
 self.addEventListener("install", event => {

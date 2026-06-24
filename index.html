@@ -1109,6 +1109,7 @@
         }
         state.selected = null;
         render();
+        openMarketChooser();
       } catch (error) {
         alert(error.message || "文件读取失败，请换一个文件重试。");
       } finally {
